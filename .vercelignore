@@ -1,0 +1,4 @@
+# CineOps One
+.next
+node_modules
+.env.local
