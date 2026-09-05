@@ -1,4 +1,4 @@
-import { DRAIN_TARGETS, EDGES, SUSPECT_EDGE } from "@/lib/show";
+import { EDGES } from "@/lib/show";
 import type { IsolatePlan } from "@/db/types";
 
 const ALLOWED = new Set<string>(EDGES);
@@ -14,22 +14,37 @@ export function assertEuWestEdge(edge: string) {
 
 export function drainPlan(fromEdge: string): IsolatePlan {
   const edge = assertEuWestEdge(fromEdge);
-  if (edge !== SUSPECT_EDGE) {
-    throw new Error(`Playbook refused: isolate is bounded to ${SUSPECT_EDGE} for this demo.`);
-  }
+  const drainTo = EDGES.filter((item) => item !== edge);
   return {
     suspectEdge: edge,
-    drainTo: [...DRAIN_TARGETS],
-    reason:
-      "Outlier buffer ratio, origin 5xx, and edge latency on eu-west-edge-3. Simulated drain to eu-west-edge-1/2. No live CDN patch.",
+    drainTo,
+    reason: `Simulated drain of ${edge} to ${drainTo.join(" / ")}. No live CDN patch.`,
     simulated: true,
   };
 }
 
-export function pickSuspectEdge(series: { edge: string; bufferRatio: number; origin5xx: number }[]) {
-  const ranked = series
-    .filter((row) => ALLOWED.has(row.edge))
-    .sort((a, b) => b.bufferRatio + b.origin5xx - (a.bufferRatio + a.origin5xx));
-  const top = ranked[0]?.edge ?? SUSPECT_EDGE;
-  return assertEuWestEdge(top);
+export type IsolateValidation =
+  | { ok: true; plan: IsolatePlan }
+  | { ok: false; reason: string };
+
+export function validateIsolate(input: {
+  suspectEdge: string;
+  simulated?: boolean;
+  killed?: boolean;
+}): IsolateValidation {
+  if (input.killed) {
+    return { ok: false, reason: "Kill switch engaged — failover blocked." };
+  }
+  if (input.simulated === false) {
+    return { ok: false, reason: "Playbook refused: only a simulated drain is allowed." };
+  }
+  try {
+    const plan = drainPlan(input.suspectEdge);
+    return { ok: true, plan };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "Playbook refused isolate.",
+    };
+  }
 }

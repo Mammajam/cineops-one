@@ -11,9 +11,11 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "seed:grafana": "node scripts/seed-grafana.mjs",
+    "push:qos": "node scripts/push-qos-metrics.mjs",
     "mcp:grafana": "node scripts/run-mcp-grafana-http.mjs"
   },
   "dependencies": {
+    "@google/adk": "^2.0.0",
     "@google/genai": "^2.17.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@neondatabase/serverless": "^1.1.0",

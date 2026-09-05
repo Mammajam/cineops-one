@@ -5,9 +5,9 @@
  * Local:
  *   npm run mcp:grafana
  *
- * Production tip:
- *   Deploy this process (or `uvx mcp-grafana --transport sse|http`) on Cloud Run / Fly
- *   and set GRAFANA_MCP_TRANSPORT=http + GRAFANA_MCP_URL=https://…/mcp on Vercel.
+ * Production:
+ *   Deploy this process on Cloud Run / Fly and set
+ *   GRAFANA_MCP_TRANSPORT=http + GRAFANA_MCP_URL=https://…/mcp on Vercel.
  *
  * Requires: GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN, and `uvx` on PATH.
  */
@@ -33,13 +33,15 @@ const command = process.platform === "win32" ? "uvx.exe" : "uvx";
 const args = [
   "mcp-grafana",
   "--transport",
-  "sse",
+  "streamable-http",
   "--address",
   `0.0.0.0:${port}`,
+  "--endpoint-path",
+  "/mcp",
 ];
 
 console.log(`[mcp-grafana-http] Starting ${command} ${args.join(" ")}`);
-console.log(`[mcp-grafana-http] Point GRAFANA_MCP_URL at http://127.0.0.1:${port}/mcp (or /sse)`);
+console.log(`[mcp-grafana-http] Point GRAFANA_MCP_URL at http://127.0.0.1:${port}/mcp`);
 console.log(`[mcp-grafana-http] GRAFANA_MCP_TRANSPORT=http`);
 
 const child = spawn(command, args, {

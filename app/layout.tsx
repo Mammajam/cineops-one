@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CineOps One — Night Premiere",
   description:
-    "Studio-ops console: Grafana Cloud MCP + Gemini background interactions for live premiere QoS.",
+    "Studio-ops console: Grafana Cloud MCP + Gemini ADK agent for live premiere QoS.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

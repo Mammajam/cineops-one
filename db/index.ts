@@ -1,6 +1,8 @@
 import { fileStore } from "./file-store";
 import { postgresStore } from "./postgres";
 import type { IncidentSnapshot } from "./types";
+import { isGeminiConfigured } from "@/lib/gemini";
+import { isGrafanaMcpLive } from "@/lib/grafana-mcp";
 
 function hasPostgres() {
   const url = process.env.DATABASE_URL ?? "";
@@ -61,6 +63,8 @@ export const store = {
     step: Parameters<typeof fileStore.setStep>[1],
     status?: Parameters<typeof fileStore.setStep>[2],
   ) => withStore((s) => s.setStep(interactionId, step, status)),
+  tryBeginTick: (interactionId: string) => withStore((s) => s.tryBeginTick(interactionId)),
+  endTick: (interactionId: string) => withStore((s) => s.endTick(interactionId)),
   dbMode: () => (usePostgres ? "neon" : "file"),
 };
 
@@ -81,8 +85,8 @@ export async function getSnapshot(incidentId: string): Promise<IncidentSnapshot 
     actions,
     auditEvents,
     mcpTrace,
-    grafanaMode: process.env.GRAFANA_URL && process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN ? "mcp" : "fixture",
-    geminiMode: process.env.GEMINI_API_KEY ? "live" : "local-playbook",
+    grafanaMode: isGrafanaMcpLive() ? "mcp" : "fixture",
+    geminiMode: isGeminiConfigured() ? "live" : "local-playbook",
   };
 }
 

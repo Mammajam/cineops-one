@@ -33,12 +33,27 @@ export function isGrafanaConfigured() {
   return Boolean(process.env.GRAFANA_URL && process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN);
 }
 
-export function grafanaMode(): GrafanaCallMode {
-  return isGrafanaConfigured() && !connectError ? "mcp" : "fixture";
-}
-
 function transportMode() {
   return (process.env.GRAFANA_MCP_TRANSPORT ?? "stdio").toLowerCase();
+}
+
+/** Streamable HTTP MCP URL, or null — never falls back to localhost in production. */
+export function grafanaMcpHttpUrl(): string | null {
+  const explicit = process.env.GRAFANA_MCP_URL?.trim();
+  if (explicit) return explicit;
+  const grafanaUrl = process.env.GRAFANA_URL?.trim();
+  if (grafanaUrl?.includes("/mcp")) return grafanaUrl;
+  return null;
+}
+
+export function isGrafanaMcpLive() {
+  if (!isGrafanaConfigured() || connectError) return false;
+  if (transportMode() === "http") return Boolean(grafanaMcpHttpUrl());
+  return true;
+}
+
+export function grafanaMode(): GrafanaCallMode {
+  return isGrafanaMcpLive() ? "mcp" : "fixture";
 }
 
 async function connectMcp(): Promise<McpClient> {
@@ -52,12 +67,12 @@ async function connectMcp(): Promise<McpClient> {
   const mode = transportMode();
 
   if (mode === "http") {
-    // Prefer dedicated MCP endpoint for serverless (Vercel cannot spawn uvx).
-    // GRAFANA_MCP_URL = hosted mcp-grafana Streamable HTTP URL.
-    // Do not reuse GRAFANA_URL (Grafana UI) unless it already ends with /mcp.
-    const mcpUrl =
-      process.env.GRAFANA_MCP_URL?.trim() ||
-      (grafanaUrl.includes("/mcp") ? grafanaUrl : "http://127.0.0.1:8000/mcp");
+    const mcpUrl = grafanaMcpHttpUrl();
+    if (!mcpUrl) {
+      throw new Error(
+        "GRAFANA_MCP_TRANSPORT=http requires GRAFANA_MCP_URL (hosted mcp-grafana Streamable HTTP). No localhost fallback.",
+      );
+    }
     const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
       requestInit: {
         headers: {
@@ -87,7 +102,7 @@ async function connectMcp(): Promise<McpClient> {
 }
 
 async function getClient(): Promise<McpClient | null> {
-  if (!isGrafanaConfigured()) return null;
+  if (!isGrafanaMcpLive()) return null;
   if (!cached) {
     cached = connectMcp().catch((error: unknown) => {
       connectError = error instanceof Error ? error.message : String(error);
@@ -248,11 +263,8 @@ export function qosFromToolResult(result: GrafanaToolResult) {
     structuredContent?: { result?: typeof fixtureEdgeQos };
     result?: typeof fixtureEdgeQos;
   };
-  const rows =
-    payload?.structuredContent?.result ??
-    payload?.result ??
-    fixtureEdgeQos;
-  return Array.isArray(rows) ? rows : fixtureEdgeQos;
+  const rows = payload?.structuredContent?.result ?? payload?.result;
+  return Array.isArray(rows) ? rows : [];
 }
 
 export function extractIncidentId(result: GrafanaToolResult): string | null {

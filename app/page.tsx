@@ -4,14 +4,16 @@ import { RunDemoButton } from "@/components/run-demo-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SHOW } from "@/lib/show";
+import { isGeminiConfigured } from "@/lib/gemini";
+import { isGrafanaMcpLive } from "@/lib/grafana-mcp";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const incidents = await store.listIncidents();
   const latest = incidents[0] ? await getSnapshot(incidents[0].id) : null;
-  const grafanaLive = Boolean(process.env.GRAFANA_URL && process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN);
-  const geminiLive = Boolean(process.env.GEMINI_API_KEY);
+  const grafanaLive = isGrafanaMcpLive();
+  const geminiLive = isGeminiConfigured();
 
   return (
     <div className="space-y-6">
@@ -19,9 +21,9 @@ export default async function HomePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Studio-ops console</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {SHOW.name} is on air in {SHOW.region}. When Grafana fires a QoS alert, Gemini starts a
-            background Interaction, queries Grafana MCP, isolates the failing edge, and writes the
-            outcome into a Grafana Incident.
+            {SHOW.name} is on air in {SHOW.region}. When Grafana fires a QoS alert, a Gemini
+            ADK agent queries Grafana MCP, returns an isolate verdict, and the playbook gates a
+            simulated drain into a Grafana Incident.
           </p>
         </div>
         <RunDemoButton />
@@ -32,7 +34,7 @@ export default async function HomePage() {
           {grafanaLive ? "Grafana MCP live" : "Grafana fixture / demo"}
         </Badge>
         <Badge variant={geminiLive ? "default" : "outline"}>
-          {geminiLive ? "Gemini Interactions live" : "Local playbook (no GEMINI_API_KEY)"}
+          {geminiLive ? "Gemini live" : "Gemini not live (needs-human)"}
         </Badge>
         <Badge variant="outline">DB {store.dbMode()}</Badge>
       </div>

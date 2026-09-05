@@ -283,4 +283,35 @@ export const postgresStore = {
       .returning();
     return updated ? mapInteraction(updated) : null;
   },
+  async tryBeginTick(interactionId: string) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL is not set");
+    const sqlClient = neon(url);
+    const rows = (await sqlClient`
+      UPDATE interactions
+      SET raw = jsonb_set(COALESCE(raw, '{}'::jsonb), '{tickLock}', 'true'::jsonb),
+          updated_at = now(),
+          last_poll_at = now()
+      WHERE id = ${interactionId}
+        AND (
+          COALESCE(raw->>'tickLock', 'false') <> 'true'
+          OR last_poll_at < now() - interval '90 seconds'
+        )
+      RETURNING id
+    `) as { id: string }[];
+    return rows.length > 0;
+  },
+  async endTick(interactionId: string) {
+    const db = client();
+    const interaction = await this.getInteraction(interactionId);
+    if (!interaction) return null;
+    const next = { ...(interaction.raw ?? {}) };
+    delete next.tickLock;
+    const [updated] = await db
+      .update(schema.interactions)
+      .set({ raw: next, updatedAt: new Date() })
+      .where(eq(schema.interactions.id, interactionId))
+      .returning();
+    return updated ? mapInteraction(updated) : null;
+  },
 };

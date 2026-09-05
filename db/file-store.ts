@@ -173,4 +173,29 @@ export const fileStore = {
       return row;
     });
   },
+  async tryBeginTick(interactionId: string) {
+    return mutate((db) => {
+      const row = db.interactions.find((item) => item.id === interactionId);
+      if (!row) return false;
+      if (row.raw?.tickLock === true) {
+        const lockedAt = row.lastPollAt ? Date.parse(row.lastPollAt) : 0;
+        if (Number.isFinite(lockedAt) && Date.now() - lockedAt < 90_000) return false;
+      }
+      row.raw = { ...(row.raw ?? {}), tickLock: true };
+      row.lastPollAt = new Date().toISOString();
+      row.updatedAt = new Date().toISOString();
+      return true;
+    });
+  },
+  async endTick(interactionId: string) {
+    return mutate((db) => {
+      const row = db.interactions.find((item) => item.id === interactionId);
+      if (!row) return null;
+      const next = { ...(row.raw ?? {}) };
+      delete next.tickLock;
+      row.raw = next;
+      row.updatedAt = new Date().toISOString();
+      return row;
+    });
+  },
 };

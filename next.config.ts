@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "@modelcontextprotocol/sdk",
     "@google/genai",
+    "@google/adk",
   ],
 };
 
