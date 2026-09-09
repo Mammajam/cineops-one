@@ -13,7 +13,7 @@
 import { config } from "dotenv";
 import { existsSync } from "node:fs";
 
-if (existsSync(".env.local")) config({ path: ".env.local" });
+if (existsSync(".env.local")) config({ path: ".env.local", override: true });
 else config();
 
 const writeUrl = process.env.GRAFANA_METRICS_WRITE_URL?.trim();
@@ -46,7 +46,7 @@ if (user && password) {
   process.exit(0);
 }
 
-const ns = Date.now() * 1e6;
+const ns = `${BigInt(Date.now()) * 1_000_000n}`;
 const lines = [
   `cineops_buffer_ratio,edge=eu-west-edge-1,region=eu-west,show=night-premiere value=0.11 ${ns}`,
   `cineops_buffer_ratio,edge=eu-west-edge-2,region=eu-west,show=night-premiere value=0.12 ${ns}`,

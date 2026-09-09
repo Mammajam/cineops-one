@@ -16,7 +16,8 @@ import {
 } from "@google/adk";
 import type { Event } from "@google/adk";
 import { z } from "zod";
-import { callGrafanaTool, dashboardDeeplink, qosFromToolResult, type GrafanaToolResult } from "@/lib/grafana-mcp";
+import { callGrafanaTool, dashboardDeeplink, type GrafanaToolResult } from "@/lib/grafana-mcp";
+import { mergeQosRows, qosFromToolResult } from "@/lib/qos";
 import { GEMINI_MODEL, isVertexConfigured } from "@/lib/gemini";
 import { SHOW, EDGES } from "@/lib/show";
 import { isolateVerdictSchema, type IsolateVerdict } from "@/lib/verdict";
@@ -54,6 +55,7 @@ export type AdkTurnHooks = {
 };
 
 const GRAFANA_TOOL_NAMES = [
+  "list_datasources",
   "alerting_manage_rules",
   "query_prometheus",
   "query_loki_logs",
@@ -73,12 +75,14 @@ function cineopsInstruction() {
   return [
     `You are CineOps One, a studio-ops Gemini agent for live cinema broadcasts.`,
     `Show: ${SHOW.name}. Region: ${SHOW.region}. Status: ON AIR.`,
-    `Use Grafana MCP tools to diagnose the firing Night Premiere QoS alert: alerting_manage_rules, query_prometheus, query_loki_logs, search_dashboards.`,
-    `Isolate the outlier edge in the live data. Allowed edges: ${EDGES.join(", ")}.`,
-    `Do not prefer eu-west-edge-3. Do not assume which edge is failing. Read PromQL / Loki / alerts.`,
-    `If tool results are mode=fixture, labeled FIXTURE, empty, or you are not confident, call mark_needs_human. Never invent a high-confidence isolate from demo data.`,
-    `When the data shows a clear outlier, call submit_isolate_verdict with action simulate-drain. Simulated drain only — never patch live CDN routing.`,
-    `Honor a kill switch: if the crew cancelled, call mark_needs_human and do not isolate.`,
+    `Diagnose with Grafana MCP, then finish. Budget is tight — a few tool calls, then a verdict.`,
+    `1) alerting_manage_rules with operation=list.`,
+    `2) query_prometheus for cineops_buffer_ratio and cineops_origin_5xx (datasourceUid is filled if omitted). Use queryType=instant.`,
+    `3) If those series show a clear outlier among ${EDGES.join(", ")}, call submit_isolate_verdict with action simulate-drain.`,
+    `Do not prefer eu-west-edge-3. Do not assume which edge is failing. Read the PromQL values.`,
+    `Do not keep repeating the same PromQL. Optional extras: list_datasources type=prometheus, search_dashboards, query_loki_logs.`,
+    `If results are mode=fixture, labeled FIXTURE, empty, or you are not confident, call mark_needs_human. Never invent a high-confidence isolate from fixture data.`,
+    `Simulated drain only — never patch live CDN routing. Honor a kill switch with mark_needs_human.`,
     `create_incident / add_activity_to_incident are available; the playbook also opens a Grafana Incident after a gated verdict.`,
   ].join("\n");
 }
@@ -161,10 +165,12 @@ function grafanaFunctionTools(ctx: {
       new FunctionTool({
         name,
         description:
-          name === "alerting_manage_rules"
-            ? "List Grafana alert rules / firing QoS alerts for the live show."
+          name === "list_datasources"
+            ? "List Grafana datasources. Use type=prometheus or type=loki to get datasourceUid."
+            : name === "alerting_manage_rules"
+            ? "List Grafana alert rules / firing QoS alerts for the live show. Pass operation=list."
             : name === "query_prometheus"
-              ? "Query Prometheus via Grafana MCP for cineops_buffer_ratio, cineops_origin_5xx, cineops_edge_latency."
+              ? "Query Prometheus via Grafana MCP for cineops_buffer_ratio, cineops_origin_5xx, cineops_edge_latency. datasourceUid is optional (auto-resolved). queryType=instant."
               : name === "query_loki_logs"
                 ? "Query Loki logs via Grafana MCP for a suspect edge."
                 : name === "search_dashboards"
@@ -174,9 +180,15 @@ function grafanaFunctionTools(ctx: {
                     : "Update a Grafana Incident with evidence or resolve notes.",
         parameters: z.object({
           operation: z.string().optional(),
+          type: z.string().optional(),
           limit: z.number().optional(),
           expr: z.string().optional(),
           query: z.string().optional(),
+          queryType: z.string().optional(),
+          datasourceUid: z.string().optional(),
+          startTime: z.string().optional(),
+          endTime: z.string().optional(),
+          stepSeconds: z.number().optional(),
           logql: z.string().optional(),
           start: z.string().optional(),
           end: z.string().optional(),
@@ -192,8 +204,10 @@ function grafanaFunctionTools(ctx: {
           await ctx.hooks.onGrafanaTool(name, args, result);
           if (name === "query_prometheus") {
             const rows = qosFromToolResult(result);
-            if (rows.length) ctx.qosRows = rows;
-            ctx.qosMode = result.mode;
+            if (rows.length) {
+              ctx.qosRows = mergeQosRows(ctx.qosRows, rows);
+              ctx.qosMode = result.mode;
+            }
           }
           if (name === "search_dashboards") {
             ctx.dashboardUrl = dashboardDeeplink(result);

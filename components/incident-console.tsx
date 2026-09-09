@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AgentStep, IncidentSnapshot, IsolatePlan } from "@/db/types";
 import type { EdgeQos } from "@/lib/grafana-fixtures";
+import { mergeQosRows, qosFromToolResult } from "@/lib/qos";
 
 const MAX_ADK_TURNS = 12;
 
@@ -42,11 +43,16 @@ function qosRowsFromSnapshot(snapshot: IncidentSnapshot): EdgeQos[] {
   const fromInteraction = snapshot.interaction?.raw?.qosRows;
   const fromFinding = snapshot.findings[0]?.evidence?.qosRows;
   const candidate = fromInteraction ?? fromFinding;
-  if (qosMode !== "mcp") return [];
-  if (Array.isArray(candidate) && candidate.length > 0) {
+  if (qosMode === "mcp" && Array.isArray(candidate) && candidate.length > 0) {
     return candidate as EdgeQos[];
   }
-  return [];
+  return snapshot.mcpTrace
+    .filter((entry) => entry.tool === "query_prometheus" && entry.mode === "mcp")
+    .reduce<EdgeQos[]>(
+      (rows, entry) =>
+        mergeQosRows(rows, qosFromToolResult({ result: entry.result })),
+      [],
+    );
 }
 
 function needsHumanReason(snapshot: IncidentSnapshot) {
@@ -211,7 +217,7 @@ export function IncidentConsole({ initial }: { initial: IncidentSnapshot }) {
   const canSimulate = Boolean(finding) && !busy && !terminal;
   const canKill = !busy && !terminal;
   const qosSource =
-    snapshot.interaction?.raw?.qosMode === "mcp"
+    qosRows.length > 0
       ? "Grafana MCP query"
       : snapshot.grafanaMode === "mcp"
         ? "Grafana MCP (awaiting rows)"

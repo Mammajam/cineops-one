@@ -385,7 +385,9 @@ export async function tickIncident(id: string): Promise<IncidentSnapshot | null>
           `Query Grafana MCP, then call submit_isolate_verdict or mark_needs_human.`,
           `Session ID: ${blob.sessionId}.`,
         ].join(" ")
-      : "Continue one diagnostic step. Call more Grafana MCP tools, or submit_isolate_verdict / mark_needs_human now.";
+      : blob.turnCount >= 3
+        ? "If Prometheus already returned cineops_* per-edge values, call submit_isolate_verdict now. Do not repeat the same PromQL. Otherwise mark_needs_human."
+        : "Continue one diagnostic step. Call more Grafana MCP tools, or submit_isolate_verdict / mark_needs_human now.";
 
   let turn;
   try {

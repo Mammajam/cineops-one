@@ -45,7 +45,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Chrome should read **Night Premiere · EU-West · ON AIR**. Click **Run Night Premiere incident**.
 
-Local with HTTP MCP: `GRAFANA_MCP_TRANSPORT=http` and `GRAFANA_MCP_URL=http://127.0.0.1:8000/mcp` while `npm run mcp:grafana` is running.
+Local with HTTP MCP: `GRAFANA_MCP_TRANSPORT=http` and `GRAFANA_MCP_URL=http://127.0.0.1:8000/mcp` while `npm run mcp:grafana` is running. After setting `GRAFANA_ORG_ID`, restart that MCP process so Grafana Incident create uses the org.
 
 | Name | Purpose |
 | --- | --- |
@@ -56,6 +56,7 @@ Local with HTTP MCP: `GRAFANA_MCP_TRANSPORT=http` and `GRAFANA_MCP_URL=http://12
 | `GOOGLE_CLOUD_LOCATION` | Vertex location (required with Vertex) |
 | `GRAFANA_URL` | Grafana Cloud instance URL (UI / API base) |
 | `GRAFANA_SERVICE_ACCOUNT_TOKEN` | Service account token for `mcp-grafana` (Editor+) |
+| `GRAFANA_ORG_ID` | Numeric Grafana org. Required for Grafana Incident (`create_incident`). Confirm at `/api/org`. |
 | `GRAFANA_MCP_TRANSPORT` | `stdio` (local `uvx mcp-grafana`) or `http` (hosted MCP) |
 | `GRAFANA_MCP_URL` | Streamable HTTP MCP endpoint when transport is `http`. **Required in http mode** — no localhost fallback on Vercel. |
 | `GRAFANA_METRICS_WRITE_URL` | Grafana Cloud Influx/Prometheus write URL for `npm run push:qos` |

@@ -15,11 +15,12 @@ import { config } from "dotenv";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
-if (existsSync(".env.local")) config({ path: ".env.local" });
+if (existsSync(".env.local")) config({ path: ".env.local", override: true });
 else config();
 
 const grafanaUrl = process.env.GRAFANA_URL;
 const token = process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN;
+const orgId = process.env.GRAFANA_ORG_ID?.trim();
 const port = process.env.GRAFANA_MCP_PORT ?? "8000";
 
 if (!grafanaUrl || !token) {
@@ -43,6 +44,11 @@ const args = [
 console.log(`[mcp-grafana-http] Starting ${command} ${args.join(" ")}`);
 console.log(`[mcp-grafana-http] Point GRAFANA_MCP_URL at http://127.0.0.1:${port}/mcp`);
 console.log(`[mcp-grafana-http] GRAFANA_MCP_TRANSPORT=http`);
+console.log(
+  orgId
+    ? `[mcp-grafana-http] GRAFANA_ORG_ID=${orgId}`
+    : "[mcp-grafana-http] GRAFANA_ORG_ID unset — create_incident may fail (IRM org 0).",
+);
 
 const child = spawn(command, args, {
   stdio: "inherit",
@@ -50,6 +56,7 @@ const child = spawn(command, args, {
     ...process.env,
     GRAFANA_URL: grafanaUrl,
     GRAFANA_SERVICE_ACCOUNT_TOKEN: token,
+    ...(orgId ? { GRAFANA_ORG_ID: orgId } : {}),
   },
 });
 

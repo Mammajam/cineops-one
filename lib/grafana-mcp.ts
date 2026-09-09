@@ -12,7 +12,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { fixtureForTool, FIXTURE_LABEL, fixtureEdgeQos } from "@/lib/grafana-fixtures";
+import { fixtureForTool, FIXTURE_LABEL } from "@/lib/grafana-fixtures";
 import { SHOW, SUSPECT_EDGE } from "@/lib/show";
 
 export type GrafanaCallMode = "mcp" | "fixture";
@@ -28,9 +28,25 @@ type McpClient = Client;
 
 let cached: Promise<McpClient> | null = null;
 let connectError: string | null = null;
+const datasourceUidCache: { prometheus?: string; loki?: string } = {};
 
 export function isGrafanaConfigured() {
   return Boolean(process.env.GRAFANA_URL && process.env.GRAFANA_SERVICE_ACCOUNT_TOKEN);
+}
+
+/** Numeric Grafana org for IRM / MCP. Empty means mcp-grafana falls back to org 0, which breaks create_incident. */
+export function grafanaOrgId(): string | null {
+  const raw = process.env.GRAFANA_ORG_ID?.trim();
+  return raw || null;
+}
+
+function grafanaRequestHeaders(token: string) {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  };
+  const orgId = grafanaOrgId();
+  if (orgId) headers["X-Grafana-Org-Id"] = orgId;
+  return headers;
 }
 
 function transportMode() {
@@ -75,9 +91,7 @@ async function connectMcp(): Promise<McpClient> {
     }
     const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
       requestInit: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: grafanaRequestHeaders(token),
       },
     });
     await client.connect(transport);
@@ -90,6 +104,8 @@ async function connectMcp(): Promise<McpClient> {
   }
   env.GRAFANA_URL = grafanaUrl;
   env.GRAFANA_SERVICE_ACCOUNT_TOKEN = token;
+  const orgId = grafanaOrgId();
+  if (orgId) env.GRAFANA_ORG_ID = orgId;
 
   const transport = new StdioClientTransport({
     command: process.platform === "win32" ? "uvx.exe" : "uvx",
@@ -131,6 +147,89 @@ function parseToolResult(result: unknown) {
   return result;
 }
 
+function rowsFromUnknown(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) {
+    return payload.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
+  }
+  if (payload && typeof payload === "object") {
+    const nested =
+      (payload as { datasources?: unknown }).datasources ??
+      (payload as { result?: unknown }).result ??
+      (payload as { data?: unknown }).data;
+    if (Array.isArray(nested)) {
+      return nested.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
+    }
+  }
+  return [];
+}
+
+async function resolveDatasourceUid(client: McpClient, type: "prometheus" | "loki") {
+  const envKey = type === "prometheus" ? "GRAFANA_PROM_DATASOURCE_UID" : "GRAFANA_LOKI_DATASOURCE_UID";
+  const fromEnv = process.env[envKey]?.trim();
+  if (fromEnv) return fromEnv;
+  if (datasourceUidCache[type]) return datasourceUidCache[type];
+
+  const raw = await client.callTool({
+    name: "list_datasources",
+    arguments: { type, limit: 20 },
+  });
+  const rows = rowsFromUnknown(parseToolResult(raw));
+  const match =
+    rows.find((row) => String(row.type ?? "").toLowerCase().includes(type)) ?? rows[0];
+  const uid = match ? String(match.uid ?? "").trim() : "";
+  if (uid) datasourceUidCache[type] = uid;
+  return uid || undefined;
+}
+
+async function normalizeMcpArgs(
+  client: McpClient,
+  name: string,
+  incoming: Record<string, unknown>,
+) {
+  const args = { ...incoming };
+
+  if (name === "alerting_manage_rules" && !args.operation) {
+    args.operation = "list";
+  }
+
+  if (name === "query_prometheus") {
+    if (!args.expr && typeof args.query === "string") args.expr = args.query;
+    delete args.query;
+    delete args.body;
+    if (!args.datasourceUid) {
+      const uid = await resolveDatasourceUid(client, "prometheus");
+      if (uid) args.datasourceUid = uid;
+    }
+    if (!args.queryType) args.queryType = "range";
+    if (typeof args.start === "string" && args.start.trim() && !args.startTime) {
+      args.startTime = args.start.trim();
+    }
+    if (typeof args.end === "string" && args.end.trim() && !args.endTime) {
+      args.endTime = args.end.trim();
+    }
+    delete args.start;
+    delete args.end;
+    for (const key of ["startTime", "endTime", "expr", "datasourceUid", "queryType"] as const) {
+      if (typeof args[key] === "string" && !args[key].trim()) delete args[key];
+    }
+    if (!args.startTime) args.startTime = "now-6h";
+    if (!args.endTime) args.endTime = "now";
+    if (args.queryType === "range" && typeof args.stepSeconds !== "number") {
+      args.stepSeconds = 15;
+    }
+  }
+
+  if (name === "query_loki_logs") {
+    if (!args.logql && typeof args.query === "string") args.logql = args.query;
+    if (!args.datasourceUid) {
+      const uid = await resolveDatasourceUid(client, "loki");
+      if (uid) args.datasourceUid = uid;
+    }
+  }
+
+  return args;
+}
+
 /** Import-and-call site for official Grafana MCP tools. */
 export async function callGrafanaTool(
   name: string,
@@ -148,7 +247,8 @@ export async function callGrafanaTool(
     };
   }
 
-  const raw = await client.callTool({ name, arguments: args });
+  const normalized = await normalizeMcpArgs(client, name, args);
+  const raw = await client.callTool({ name, arguments: normalized });
   return {
     mode: "mcp",
     tool: name,
@@ -243,7 +343,7 @@ export async function resolveGrafanaIncident(incidentId: string, body: string) {
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${token}`,
+              ...grafanaRequestHeaders(token),
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ incidentID: incidentId, status: "resolved" }),
@@ -258,14 +358,7 @@ export async function resolveGrafanaIncident(incidentId: string, body: string) {
   return activity;
 }
 
-export function qosFromToolResult(result: GrafanaToolResult) {
-  const payload = result.result as {
-    structuredContent?: { result?: typeof fixtureEdgeQos };
-    result?: typeof fixtureEdgeQos;
-  };
-  const rows = payload?.structuredContent?.result ?? payload?.result;
-  return Array.isArray(rows) ? rows : [];
-}
+export { mergeQosRows, qosFromToolResult } from "@/lib/qos";
 
 export function extractIncidentId(result: GrafanaToolResult): string | null {
   const raw = JSON.stringify(result.result);

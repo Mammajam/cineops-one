@@ -6,7 +6,7 @@
 import { config } from "dotenv";
 import { existsSync } from "node:fs";
 
-if (existsSync(".env.local")) config({ path: ".env.local" });
+if (existsSync(".env.local")) config({ path: ".env.local", override: true });
 else config();
 
 const grafanaUrl = process.env.GRAFANA_URL?.replace(/\/$/, "");
@@ -86,8 +86,10 @@ const dashboard = {
   overwrite: true,
 };
 
+const orgId = Number(process.env.GRAFANA_ORG_ID?.trim() || "1");
+
 const alertRule = {
-  orgID: 1,
+  orgID: Number.isFinite(orgId) && orgId > 0 ? orgId : 1,
   folderUID: "cineops",
   ruleGroup: "night-premiere",
   title: "NightPremiereBufferRatio",
